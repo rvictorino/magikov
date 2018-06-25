@@ -1,31 +1,55 @@
-const request = require('request-promise-native')
-const mastodon = require('mastodon-api')
-
 const fs = require('fs')
-
 const csv = require('csv')
-const parser = csv.parse({delimiter: ','})
+const parser = csv.parse({
+  delimiter: ','
+})
+
+const window_size = 2
 
 let occurrences = {}
 
 parser.on('readable', () => {
-  while(record = parser.read()){
+  while (record = parser.read()) {
     // parse line
     let words = record[0].split(' ')
-    let word
     let nextWord
     let stats
+    let key
 
     // count all occurrences of each word
-    for(let i=0; i < words.length-1; i++) {
-      word = words[i]
-      nextWord = words[i+1]
-      stats = occurrences[word] || {count: 0, items: []}
-      stats.count++
+    for (let i = 0; i < words.length - window_size; i++) {
+      let windowWords = []
+
+      for (let j = 0; j < window_size; j++) {
+        windowWords.push(words[i + j])
+      }
+
+      // special case for <START> tag: use a window of size 1
+      // we also store next words of single <START> tag
+      if (windowWords[0] == '<START>') {
+        let stat_start = occurrences['<START>'] || {
+          count: 0,
+          items: []
+        }
+        stat_start.count += 1
+        stat_start.items.push(windowWords[1])
+        occurrences['<START>'] = stat_start
+      }
+
+
+      nextWord = words[i + windowWords.length]
+      key = windowWords.join(' ')
+
+
+      stats = occurrences[key] || {
+        count: 0,
+        items: []
+      }
+      stats.count += 1
       stats.items.push(nextWord)
 
       // store data
-      occurrences[word] = stats
+      occurrences[key] = stats
     }
   }
 })
@@ -37,4 +61,4 @@ parser.on('finish', () => {
 })
 
 
-fs.createReadStream(__dirname+'/toots_sanitized.csv').pipe(parser)
+fs.createReadStream(__dirname + '/toots_sanitized.csv').pipe(parser)
