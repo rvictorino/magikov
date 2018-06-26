@@ -1,64 +1,67 @@
-const fs = require('fs')
-const csv = require('csv')
-const parser = csv.parse({
-  delimiter: ','
-})
+const fs = require('fs');
+const csv = require('csv');
 
-const window_size = 2
+const parser = csv.parse({ delimiter: ',' });
 
-let occurrences = {}
+const windowSize = 2;
+
+const occurrences = {};
 
 parser.on('readable', () => {
-  while (record = parser.read()) {
+  let record = true;
+  let words;
+
+  while (record) {
     // parse line
-    let words = record[0].split(' ')
-    let nextWord
-    let stats
-    let key
+    words = record[0].split(' ');
+    let nextWord;
+    let stats;
+    let key;
 
     // count all occurrences of each word
-    for (let i = 0; i < words.length - window_size; i++) {
-      let windowWords = []
+    for (let i = 0; i < words.length - windowSize; i += 1) {
+      const windowWords = [];
 
-      for (let j = 0; j < window_size; j++) {
-        windowWords.push(words[i + j])
+      for (let j = 0; j < windowSize; j += 1) {
+        windowWords.push(words[i + j]);
       }
 
       // special case for <START> tag: use a window of size 1
       // we also store next words of single <START> tag
-      if (windowWords[0] == '<START>') {
-        let stat_start = occurrences['<START>'] || {
+      if (windowWords[0] === '<START>') {
+        const statStart = occurrences['<START>'] || {
           count: 0,
-          items: []
-        }
-        stat_start.count += 1
-        stat_start.items.push(windowWords[1])
-        occurrences['<START>'] = stat_start
+          items: [],
+        };
+        statStart.count += 1;
+        statStart.items.push(windowWords[1]);
+        occurrences['<START>'] = statStart;
       }
 
 
-      nextWord = words[i + windowWords.length]
-      key = windowWords.join(' ')
+      nextWord = words[i + windowWords.length];
+      key = windowWords.join(' ');
 
 
       stats = occurrences[key] || {
         count: 0,
-        items: []
-      }
-      stats.count += 1
-      stats.items.push(nextWord)
+        items: [],
+      };
+      stats.count += 1;
+      stats.items.push(nextWord);
 
       // store data
-      occurrences[key] = stats
+      occurrences[key] = stats;
     }
   }
-})
+  record = parser.read();
+});
 
 parser.on('finish', () => {
   // write data in json file
-  const jsonContent = JSON.stringify(occurrences)
-  fs.writeFile('markov.json', jsonContent, 'utf8')
-})
+  const jsonContent = JSON.stringify(occurrences);
+  fs.writeFile('markov.json', jsonContent, 'utf8');
+});
 
 
-fs.createReadStream(__dirname + '/toots_sanitized.csv').pipe(parser)
+fs.createReadStream(`${__dirname}/toots_sanitized.csv`).pipe(parser);
