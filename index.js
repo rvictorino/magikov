@@ -29,31 +29,101 @@ const srcClient = new Mastodon({
 });
 
 async function getNextToots(startingId = 0) {
-  return srcClient.get(`accounts/${accountId}/statuses?limit=${maxToots}&since_id=${startingId}`);
+  return srcClient.get(`accounts/${accountId}/statuses?limit=${maxToots}&since_id=${startingId}&exclude_replies=true`);
 }
 
 async function getNewToots(startingId = 0) {
   let lastId = startingId;
   let endOfToots;
   const newToots = [];
+  let response;
   let nextToots;
-  do {
-    // disable linting here because async operations need to be run one after
-    // the other (output is required in next operation input)
-    // eslint-disable-next-line no-await-in-loop
-    nextToots = JSON.parse(await getNextToots(lastId).data);
 
-    endOfToots = nextToots.length > 0;
+  do {
+    try {
+      // disable linting here because async operations need to be run one after
+      // the other (output is required in next operation input)
+      // eslint-disable-next-line no-await-in-loop
+      response = await getNextToots(lastId);
+    } catch (e) {
+      break;
+    }
+    nextToots = response.data;
+    console.log(nextToots.map(t => t.id));
+    endOfToots = nextToots.length === 0;
     if (!endOfToots) {
-      lastId = nextToots[0].id;
-      newToots.push(nextToots);
+      // keep track of max toot id
+      lastId = nextToots.reduce((a, b) => (a > Number(b.id) ? a : Number(b.id)), lastId);
+      // keep content only
+      newToots.push(...nextToots.map(t => t.content));
     }
   } while (!endOfToots);
 
-  return nextToots;
+  return {
+    lastId,
+    toots: newToots,
+  };
 }
 
-getNewToots();
+function updateMarkovChain(toots) {
+  let words;
+  const occurrences = {};
+
+  toots.toots.forEach((t) => {
+    // parse line
+    words = t[0].split(' ');
+    let nextWord;
+    let stats;
+    let key;
+
+    // count all occurrences of each word
+    for (let i = 0; i < words.length - windowSize; i += 1) {
+      const windowWords = [];
+
+      for (let j = 0; j < windowSize; j += 1) {
+        windowWords.push(words[i + j]);
+      }
+
+      // special case for <START> tag: use a window of size 1
+      // we also store next words of single <START> tag
+      if (windowWords[0] === '<START>') {
+        const statStart = occurrences['<START>'] || {
+          count: 0,
+          items: [],
+        };
+        statStart.count += 1;
+        statStart.items.push(windowWords[1]);
+        occurrences['<START>'] = statStart;
+      }
+
+
+      nextWord = words[i + windowWords.length];
+      key = windowWords.join(' ');
+
+
+      stats = occurrences[key] || {
+        count: 0,
+        items: [],
+      };
+      stats.count += 1;
+      stats.items.push(nextWord);
+
+      // store data
+      occurrences[key] = stats;
+    }
+  });
+
+  return occurrences;
+}
+
+
+const toots = getNewToots();
+toots
+  .then(console.log)
+  .catch(console.error);
+
+// const updatedMarkovChain = updateMarkovChain(toots);
+// console.log(updatedMarkovChain);
 
 
 // while()
@@ -69,49 +139,49 @@ getNewToots();
 //   let record = true;
 //   let words;
 //
-//   while (record) {
-//     // parse line
-//     words = record[0].split(' ');
-//     let nextWord;
-//     let stats;
-//     let key;
+// while (record) {
+//   // parse line
+//   words = record[0].split(' ');
+//   let nextWord;
+//   let stats;
+//   let key;
 //
-//     // count all occurrences of each word
-//     for (let i = 0; i < words.length - windowSize; i += 1) {
-//       const windowWords = [];
+//   // count all occurrences of each word
+//   for (let i = 0; i < words.length - windowSize; i += 1) {
+//     const windowWords = [];
 //
-//       for (let j = 0; j < windowSize; j += 1) {
-//         windowWords.push(words[i + j]);
-//       }
+//     for (let j = 0; j < windowSize; j += 1) {
+//       windowWords.push(words[i + j]);
+//     }
 //
-//       // special case for <START> tag: use a window of size 1
-//       // we also store next words of single <START> tag
-//       if (windowWords[0] === '<START>') {
-//         const statStart = occurrences['<START>'] || {
-//           count: 0,
-//           items: [],
-//         };
-//         statStart.count += 1;
-//         statStart.items.push(windowWords[1]);
-//         occurrences['<START>'] = statStart;
-//       }
-//
-//
-//       nextWord = words[i + windowWords.length];
-//       key = windowWords.join(' ');
-//
-//
-//       stats = occurrences[key] || {
+//     // special case for <START> tag: use a window of size 1
+//     // we also store next words of single <START> tag
+//     if (windowWords[0] === '<START>') {
+//       const statStart = occurrences['<START>'] || {
 //         count: 0,
 //         items: [],
 //       };
-//       stats.count += 1;
-//       stats.items.push(nextWord);
-//
-//       // store data
-//       occurrences[key] = stats;
+//       statStart.count += 1;
+//       statStart.items.push(windowWords[1]);
+//       occurrences['<START>'] = statStart;
 //     }
+//
+//
+//     nextWord = words[i + windowWords.length];
+//     key = windowWords.join(' ');
+//
+//
+//     stats = occurrences[key] || {
+//       count: 0,
+//       items: [],
+//     };
+//     stats.count += 1;
+//     stats.items.push(nextWord);
+//
+//     // store data
+//     occurrences[key] = stats;
 //   }
+// }
 //   record = parser.read();
 // });
 //
