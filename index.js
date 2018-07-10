@@ -1,16 +1,21 @@
 require('dotenv').config();
 const fs = require('fs');
 const csv = require('csv');
+const queryString = require('querystring');
+const sanitizeHtml = require('sanitize-html');
 const Mastodon = require('mastodon-api');
 // const markovChain = require('./toots_chain.json');
 
-const parser = csv.parse({ delimiter: ',' });
+const parser = csv.parse({
+  delimiter: ','
+});
 
 const windowSize = 2;
 const hostuxUrl = 'https://hostux.social/api/v1/';
 const clientTimeout = 60000;
 const maxToots = 20;
-const accountId = 31687;
+const accountId = '31687';
+const tootsFile = './toots.json';
 
 // const tootsChain = markovChain || { lastId: null, occurrences: {} };
 // const { occurrences } = tootsChain;
@@ -28,36 +33,56 @@ const srcClient = new Mastodon({
   api_url: hostuxUrl,
 });
 
-async function getNextToots(startingId = 0) {
-  return srcClient.get(`accounts/${accountId}/statuses?limit=${maxToots}&since_id=${startingId}&exclude_replies=true`);
+async function getNextToots(startingId = '', maxId = '') {
+  let params = {
+    limit: maxToots,
+    since_id: startingId,
+    exclude_replies: true,
+  };
+  if (maxId) {
+    params['max_id'] = maxId;
+  }
+  return srcClient.get(`accounts/${accountId}/statuses?${queryString.stringify(params)}`);
 }
 
-async function getNewToots(startingId = 0) {
-  let lastId = startingId;
+async function getNewToots(currentToots) {
+  let lastId = currentToots.lastId;
+  const newToots = currentToots.toots;
+  let maxId;
   let endOfToots;
-  const newToots = [];
   let response;
   let nextToots;
+  console.log(lastId)
 
   do {
+    console.log('executing request')
     try {
       // disable linting here because async operations need to be run one after
       // the other (output is required in next operation input)
       // eslint-disable-next-line no-await-in-loop
-      response = await getNextToots(lastId);
+      response = await getNextToots(lastId, maxId);
     } catch (e) {
       break;
     }
     nextToots = response.data;
-    console.log(nextToots.map(t => t.id));
-    endOfToots = nextToots.length === 0;
+    endOfToots = !nextToots.length > 0;
     if (!endOfToots) {
       // keep track of max toot id
-      lastId = nextToots.reduce((a, b) => (a > Number(b.id) ? a : Number(b.id)), lastId);
+      maxId = nextToots[nextToots.length - 1].id
       // keep content only
-      newToots.push(...nextToots.map(t => t.content));
+      newToots.push(...nextToots.map(t => ({
+        id: t.id,
+        content: t.content,
+        account_id: t.account.id,
+        reblog: t.reblog,
+        visibility: t.visibility,
+        mentions: t.mentions,
+      })));
     }
-  } while (!endOfToots);
+  }
+  while (!endOfToots);
+
+  lastId = newToots.reduce((a, b) => (a > Number(b.id) ? a : Number(b.id)), 0)
 
   return {
     lastId,
@@ -117,10 +142,46 @@ function updateMarkovChain(toots) {
 }
 
 
-const toots = getNewToots();
-toots
-  .then(console.log)
-  .catch(console.error);
+const filterToots = (toots) => ({
+  lastId: toots.lastId,
+  toots: toots.toots
+    .filter(t => t.reblog === null && t.account_id === accountId && t.visibility === 'public')
+    .map((t) => {
+      return sanitizeHtml(t.content, {
+          allowedTags: ['br', 'p'],
+          allowedAttributes: [],
+        })
+        .replace(/<br \/>/gi, '\n')
+        .replace(/<p>/gi, '')
+        .replace(/<\/p>/gi, '\n')
+    }),
+})
+
+let currentToots;
+fs.readFile(tootsFile, (err, data) => {
+  if (err) {
+    currentToots = {
+      lastId: 0,
+      toots: [],
+    };
+  } else {
+    currentToots = JSON.parse(data);
+  }
+  getNewToots(currentToots)
+    .then((toots) => {
+      const jsonToots = JSON.stringify(filterToots(toots));
+      fs.writeFile(tootsFile, jsonToots, (err) => {
+        if (err) {
+          console.error(err);
+        } else {
+          console.log('file saved.');
+        }
+      })
+    })
+    .catch(console.error);
+});
+
+
 
 // const updatedMarkovChain = updateMarkovChain(toots);
 // console.log(updatedMarkovChain);
