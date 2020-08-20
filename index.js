@@ -34,28 +34,29 @@ const srcClient = new Mastodon({
 });
 
 async function getNextToots(startingId = '', maxId = '') {
-  let params = {
+  const params = {
     limit: maxToots,
     since_id: startingId,
     exclude_replies: true,
   };
   if (maxId) {
-    params['max_id'] = maxId;
+    params.max_id = maxId;
   }
   return srcClient.get(`accounts/${accountId}/statuses?${queryString.stringify(params)}`);
 }
 
 async function getNewToots(currentToots) {
-  let lastId = currentToots.lastId;
-  const newToots = currentToots.toots;
+  let { lastId } = currentToots;
+  let newToots = [];
   let maxId;
   let endOfToots;
   let response;
   let nextToots;
-  console.log(lastId)
+  console.log(lastId);
+  console.log(newToots.length);
 
   do {
-    console.log('executing request')
+    console.log('executing request');
     try {
       // disable linting here because async operations need to be run one after
       // the other (output is required in next operation input)
@@ -68,9 +69,9 @@ async function getNewToots(currentToots) {
     endOfToots = !nextToots.length > 0;
     if (!endOfToots) {
       // keep track of max toot id
-      maxId = nextToots[nextToots.length - 1].id
+      maxId = nextToots[nextToots.length - 1].id;
       // keep content only
-      newToots.push(...nextToots.map(t => ({
+      newToots = newToots.concat(nextToots.map(t => ({
         id: t.id,
         content: t.content,
         account_id: t.account.id,
@@ -82,11 +83,12 @@ async function getNewToots(currentToots) {
   }
   while (!endOfToots);
 
-  lastId = newToots.reduce((a, b) => (a > Number(b.id) ? a : Number(b.id)), 0)
-
+  lastId = newToots.reduce((a, b) => (a > Number(b.id) ? a : Number(b.id)), 0);
+  console.log(newToots.map(t => t.id))
+  console.log(newToots[10])
   return {
     lastId,
-    toots: newToots,
+    toots: currentToots.toots.concat(newToots),
   };
 }
 
@@ -142,20 +144,19 @@ function updateMarkovChain(toots) {
 }
 
 
-const filterToots = (toots) => ({
+const filterToots = toots => ({
   lastId: toots.lastId,
   toots: toots.toots
     .filter(t => t.reblog === null && t.account_id === accountId && t.visibility === 'public')
-    .map((t) => {
-      return sanitizeHtml(t.content, {
-          allowedTags: ['br', 'p'],
-          allowedAttributes: [],
-        })
-        .replace(/<br \/>/gi, '\n')
-        .replace(/<p>/gi, '')
-        .replace(/<\/p>/gi, '\n')
-    }),
-})
+    .map(t => sanitizeHtml(t.content, {
+      allowedTags: ['br', 'p'],
+      allowedAttributes: [],
+    })
+      .replace(/<br \/>/gi, '\n')
+      .replace(/<p>/gi, '')
+      .replace(/<\/p>/gi, '\n')),
+});
+
 
 let currentToots;
 fs.readFile(tootsFile, (err, data) => {
@@ -169,18 +170,19 @@ fs.readFile(tootsFile, (err, data) => {
   }
   getNewToots(currentToots)
     .then((toots) => {
+      console.log(toots)
       const jsonToots = JSON.stringify(filterToots(toots));
-      fs.writeFile(tootsFile, jsonToots, (err) => {
-        if (err) {
-          console.error(err);
+      console.log(jsonToots.length)
+      fs.writeFile(tootsFile, jsonToots, (error) => {
+        if (error) {
+          console.error(error);
         } else {
           console.log('file saved.');
         }
-      })
+      });
     })
     .catch(console.error);
 });
-
 
 
 // const updatedMarkovChain = updateMarkovChain(toots);
